@@ -1,0 +1,6 @@
+{
+  "name": "땡큐베리마인드",
+  "description": "중학생 자존감 향상 마음챙김 및 감사일기 웹앱 (무드미터, 마음 날씨 달력, 감사 기록, 교사용 멘티미터형 워드클라우드 및 통계 대시보드)",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
