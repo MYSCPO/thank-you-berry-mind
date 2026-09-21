@@ -30,6 +30,26 @@ export function saveStoredStudents(students: Student[]): void {
   }
 }
 
+// Helper to clean numeric values (e.g. "2학년" -> "2", "03" -> "3")
+export function cleanDigits(val?: string | number | null): string {
+  if (val == null) return '';
+  const str = String(val).replace(/[^0-9]/g, '');
+  return str ? String(parseInt(str, 10)) : '';
+}
+
+// Clean legacy mock entries that might be lingering in student or teacher localStorage
+export function cleanLegacyMockEntries(entries: DiaryEntry[]): DiaryEntry[] {
+  return entries.filter(e => {
+    if (!e) return false;
+    // Hardcoded mock diary lines from earlier prototypes
+    if (e.gratitude1 === '다치지 않고 건강하게 뛰어놀 수 있어서 감사.') return false;
+    if (e.gratitude2 === '새로 사귄 짝꿍과 취미가 같아서 대화가 잘 통했다.') return false;
+    if (e.gratitude3 === '아침 일찍 일어나 지각하지 않고 일찍 도착했다.') return false;
+    if (e.id && String(e.id).startsWith('mock-')) return false;
+    return true;
+  });
+}
+
 export function getStoredDiaries(): DiaryEntry[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.DIARIES);
@@ -37,7 +57,14 @@ export function getStoredDiaries(): DiaryEntry[] {
       localStorage.setItem(STORAGE_KEYS.DIARIES, JSON.stringify(INITIAL_DIARIES));
       return INITIAL_DIARIES;
     }
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return INITIAL_DIARIES;
+    const cleaned = cleanLegacyMockEntries(parsed);
+    // If cleaned filtered out old mock data, update storage
+    if (cleaned.length !== parsed.length) {
+      localStorage.setItem(STORAGE_KEYS.DIARIES, JSON.stringify(cleaned));
+    }
+    return cleaned;
   } catch (e) {
     return INITIAL_DIARIES;
   }
@@ -45,9 +72,18 @@ export function getStoredDiaries(): DiaryEntry[] {
 
 export function saveStoredDiaries(diaries: DiaryEntry[]): void {
   try {
-    localStorage.setItem(STORAGE_KEYS.DIARIES, JSON.stringify(diaries));
+    const cleaned = cleanLegacyMockEntries(diaries);
+    localStorage.setItem(STORAGE_KEYS.DIARIES, JSON.stringify(cleaned));
   } catch (e) {
     console.error('Failed to save diaries to localStorage', e);
+  }
+}
+
+export function clearAllDiaries(): void {
+  try {
+    localStorage.setItem(STORAGE_KEYS.DIARIES, JSON.stringify([]));
+  } catch (e) {
+    console.error('Failed to clear diaries in localStorage', e);
   }
 }
 
@@ -144,9 +180,10 @@ export function getTodayStr(): string {
 
 export function parseClassFilter(classFilter?: string): { grade: string; classroom: string } | null {
   if (!classFilter || classFilter === '전체' || classFilter === '전체 학급') return null;
-  const match = classFilter.match(/^(\d+)학년\s*(\d+)반$/);
+  // Support "1학년 2반", "1-2", "1학년2반", "1학년 2반 (30명)" etc.
+  const match = classFilter.match(/(\d+)\s*학년\s*(\d+)\s*반/);
   if (!match) return null;
-  return { grade: match[1], classroom: match[2] };
+  return { grade: cleanDigits(match[1]), classroom: cleanDigits(match[2]) };
 }
 
 export function getPeriodCutoff(period: string): Date | null {
@@ -181,11 +218,13 @@ export function filterDiaries(
 
   return diaries.filter(d => {
     if (cFilter) {
-      if (d.grade !== cFilter.grade || d.classroom !== cFilter.classroom) return false;
+      const dGrade = cleanDigits(d.grade);
+      const dClass = cleanDigits(d.classroom);
+      if (dGrade !== cFilter.grade || dClass !== cFilter.classroom) return false;
     }
     if (cutoff) {
       const rowDate = new Date(d.dateStr || d.timestamp);
-      if (rowDate < cutoff) return false;
+      if (isNaN(rowDate.getTime()) || rowDate < cutoff) return false;
     }
     return true;
   });
@@ -247,15 +286,17 @@ export function computeParticipationRate(
   const cFilter = parseClassFilter(classFilter);
   const targetStudents = students.filter(s => {
     if (!cFilter) return true;
-    return s.grade === cFilter.grade && s.classroom === cFilter.classroom;
+    return cleanDigits(s.grade) === cFilter.grade && cleanDigits(s.classroom) === cFilter.classroom;
   });
 
-  const studentKeySet = new Set(targetStudents.map(s => `${s.grade}-${s.classroom}-${s.number}`));
+  const studentKeySet = new Set(
+    targetStudents.map(s => `${cleanDigits(s.grade)}-${cleanDigits(s.classroom)}-${cleanDigits(s.number)}`)
+  );
   const filteredDiaries = filterDiaries(diaries, classFilter, period);
 
   const writtenKeys = new Set<string>();
   filteredDiaries.forEach(d => {
-    const key = `${d.grade}-${d.classroom}-${d.number}`;
+    const key = `${cleanDigits(d.grade)}-${cleanDigits(d.classroom)}-${cleanDigits(d.number)}`;
     if (studentKeySet.has(key)) {
       writtenKeys.add(key);
     }
@@ -299,7 +340,7 @@ export function computeWeeklyTrend(
   const cFilter = parseClassFilter(classFilter);
   const classDiaries = diaries.filter(d => {
     if (!cFilter) return true;
-    return d.grade === cFilter.grade && d.classroom === cFilter.classroom;
+    return cleanDigits(d.grade) === cFilter.grade && cleanDigits(d.classroom) === cFilter.classroom;
   });
 
   const now = new Date();

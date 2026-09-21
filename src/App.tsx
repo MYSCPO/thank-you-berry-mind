@@ -7,7 +7,8 @@ import {
   saveStoredDiaries,
   saveDiary,
   getTodayStr,
-  formatShortDate
+  formatShortDate,
+  cleanDigits
 } from './utils/storage';
 import {
   syncDiaryToGoogleSheets,
@@ -62,14 +63,25 @@ export default function App() {
   const [breathingDuration, setBreathingDuration] = useState(3);
   const [breathingMode, setBreathingMode] = useState<'breathing' | 'singingBowl'>('breathing');
 
-  // Filter student's own diaries
+  // Filter student's own diaries with digit normalization and name fallback
   const currentStudentDiaries = currentStudent
-    ? diaries.filter(
-        d =>
-          d.grade === currentStudent.grade &&
-          d.classroom === currentStudent.classroom &&
-          d.number === currentStudent.number
-      )
+    ? diaries.filter(d => {
+        const dG = cleanDigits(d.grade);
+        const dC = cleanDigits(d.classroom);
+        const dN = cleanDigits(d.number);
+        const sG = cleanDigits(currentStudent.grade);
+        const sC = cleanDigits(currentStudent.classroom);
+        const sN = cleanDigits(currentStudent.number);
+
+        const matchByNum = dG === sG && dC === sC && dN === sN;
+        const matchByName = Boolean(
+          d.studentName &&
+          currentStudent.name &&
+          d.studentName.trim() === currentStudent.name.trim() &&
+          dG === sG
+        );
+        return matchByNum || matchByName;
+      })
     : [];
 
   // Auto-sync students roster and historical diaries from Google Sheets if URL is saved
@@ -85,9 +97,10 @@ export default function App() {
         }
       });
 
-      // 2. Fetch Historical Diaries (감사일기_수집)
+      // 2. Fetch Historical Diaries (DiaryData / 감사일기_수집)
       fetchDiariesFromGoogleSheets(url).then(res => {
-        if (res.success && res.diaries && res.diaries.length > 0) {
+        if (res.success && Array.isArray(res.diaries)) {
+          // If Google Sheets returns diaries (or empty list), overwrite to eliminate old dummy test data
           setDiaries(res.diaries);
           saveStoredDiaries(res.diaries);
         }
@@ -98,6 +111,65 @@ export default function App() {
   const handleUpdateStudents = (newStudents: Student[]) => {
     setStudents(newStudents);
     saveStoredStudents(newStudents);
+  };
+
+  const handleUpdateDiaries = (newDiaries: DiaryEntry[]) => {
+    setDiaries(newDiaries);
+    saveStoredDiaries(newDiaries);
+  };
+
+  // Full manual sync function for teacher dashboard
+  const handleSyncAllFromSheets = async (): Promise<{
+    success: boolean;
+    studentCount: number;
+    diaryCount: number;
+    message: string;
+  }> => {
+    const url = getGoogleSheetsUrl();
+    if (!url) {
+      return {
+        success: false,
+        studentCount: 0,
+        diaryCount: 0,
+        message: '구글 시트 연동 URL이 설정되지 않았습니다. [구글 시트 연동 설정]에서 URL을 먼저 등록해 주세요.'
+      };
+    }
+
+    try {
+      const [sRes, dRes] = await Promise.all([
+        fetchStudentsFromGoogleSheets(url),
+        fetchDiariesFromGoogleSheets(url)
+      ]);
+
+      let sCount = students.length;
+      let dCount = diaries.length;
+
+      if (sRes.success && sRes.students && sRes.students.length > 0) {
+        setStudents(sRes.students);
+        saveStoredStudents(sRes.students);
+        sCount = sRes.students.length;
+      }
+
+      if (dRes.success && Array.isArray(dRes.diaries)) {
+        setDiaries(dRes.diaries);
+        saveStoredDiaries(dRes.diaries);
+        dCount = dRes.diaries.length;
+      }
+
+      return {
+        success: true,
+        studentCount: sCount,
+        diaryCount: dCount,
+        message: `구글 시트에서 학생 명렬표 ${sCount}명과 일기 기록(DiaryData) ${dCount}건을 성공적으로 불러왔습니다!`
+      };
+    } catch (e) {
+      return {
+        success: false,
+        studentCount: students.length,
+        diaryCount: diaries.length,
+        message: '구글 시트 연동 중 통신 오류가 발생했습니다. 웹 앱 배포 권한이 [모든 사용자]인지 확인해 주세요.'
+      };
+    }
   };
 
   const handleLoginStudent = (student: Student) => {
@@ -223,6 +295,8 @@ export default function App() {
               students={students}
               diaries={diaries}
               onUpdateStudents={handleUpdateStudents}
+              onUpdateDiaries={handleUpdateDiaries}
+              onSyncGoogleSheets={handleSyncAllFromSheets}
             />
           </div>
         ) : (

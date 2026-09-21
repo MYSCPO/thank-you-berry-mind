@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Student, DiaryEntry, MoodType } from '../types';
 import {
   computeParticipationRate,
@@ -8,7 +8,9 @@ import {
   computeGratitudeKeywordCloud,
   formatShortDate,
   formatKoreanDate,
-  isDefaultAdminPassword
+  isDefaultAdminPassword,
+  cleanDigits,
+  filterDiaries
 } from '../utils/storage';
 import {
   getGoogleSheetsUrl,
@@ -39,19 +41,24 @@ import {
   Copy,
   Check,
   Send,
-  Share2
+  Share2,
+  RefreshCw
 } from 'lucide-react';
 
 interface TeacherDashboardProps {
   students: Student[];
   diaries: DiaryEntry[];
   onUpdateStudents?: (students: Student[]) => void;
+  onUpdateDiaries?: (diaries: DiaryEntry[]) => void;
+  onSyncGoogleSheets?: () => Promise<{ success: boolean; studentCount: number; diaryCount: number; message: string }>;
 }
 
 export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   students,
   diaries,
-  onUpdateStudents
+  onUpdateStudents,
+  onUpdateDiaries,
+  onSyncGoogleSheets
 }) => {
   const [selectedClass, setSelectedClass] = useState<string>('전체');
   const [selectedPeriod, setSelectedPeriod] = useState<string>('이번달');
@@ -66,6 +73,10 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   const [isCopiedDistributionLink, setIsCopiedDistributionLink] = useState(false);
   const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'success' | 'fail'>('idle');
 
+  // Sync state
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncFeedback, setSyncFeedback] = useState<string | null>(null);
+
   // Teacher Password modal state
   const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
   const [isInitialPasswordCheck, setIsInitialPasswordCheck] = useState(false);
@@ -78,6 +89,22 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
       setIsPasswordModalOpen(true);
     }
   }, []);
+
+  const handleTriggerSync = async () => {
+    if (!onSyncGoogleSheets) return;
+    setIsSyncing(true);
+    setSyncFeedback(null);
+    try {
+      const res = await onSyncGoogleSheets();
+      setSyncFeedback(res.message);
+      setTimeout(() => setSyncFeedback(null), 5000);
+    } catch {
+      setSyncFeedback('동기화 중 오류가 발생했습니다.');
+      setTimeout(() => setSyncFeedback(null), 5000);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
 
   const handleCopyDistributionLink = () => {
     if (!sheetsUrlInput.trim()) {
@@ -115,19 +142,161 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     setTimeout(() => setIsCopiedCode(false), 2500);
   };
 
+  // Class options dynamically generated from imported roster students and existing diaries!
+  const classOptions = useMemo(() => {
+    const classSet = new Set<string>();
+
+    students.forEach(s => {
+      const g = cleanDigits(s.grade);
+      const c = cleanDigits(s.classroom);
+      if (g && c) {
+        classSet.add(`${g}학년 ${c}반`);
+      }
+    });
+
+    diaries.forEach(d => {
+      const g = cleanDigits(d.grade);
+      const c = cleanDigits(d.classroom);
+      if (g && c) {
+        classSet.add(`${g}학년 ${c}반`);
+      }
+    });
+
+    const sorted = Array.from(classSet).sort((a, b) => {
+      const ma = a.match(/(\d+)학년\s*(\d+)반/);
+      const mb = b.match(/(\d+)학년\s*(\d+)반/);
+      if (!ma || !mb) return a.localeCompare(b);
+      const ga = parseInt(ma[1], 10);
+      const gb = parseInt(mb[1], 10);
+      if (ga !== gb) return ga - gb;
+      return parseInt(ma[2], 10) - parseInt(mb[2], 10);
+    });
+
+    if (sorted.length === 0) {
+      return ['전체', '1학년 1반', '1학년 2반', '2학년 1반', '2학년 3반', '3학년 1반'];
+    }
+
+    return ['전체', ...sorted];
+  }, [students, diaries]);
+
   // Student search state
-  const [searchGrade, setSearchGrade] = useState('2');
-  const [searchClassroom, setSearchClassroom] = useState('3');
-  const [searchNumber, setSearchNumber] = useState('7');
+  const [searchClassSelect, setSearchClassSelect] = useState<string>('전체');
+  const [searchGrade, setSearchGrade] = useState('1');
+  const [searchClassroom, setSearchClassroom] = useState('1');
+  const [searchNumber, setSearchNumber] = useState('1');
+  const [searchNameInput, setSearchNameInput] = useState('');
   const [searchedStudent, setSearchedStudent] = useState<{
     student: Student | null;
     entries: DiaryEntry[];
-  } | null>(() => {
-    // default demo student
-    const defaultStudent = students.find(s => s.grade === '2' && s.classroom === '3' && s.number === '7') || null;
-    const entries = diaries.filter(d => d.grade === '2' && d.classroom === '3' && d.number === '7');
-    return defaultStudent ? { student: defaultStudent, entries } : null;
-  });
+  } | null>(null);
+
+  // Auto-initialize searched student from students or diaries on load
+  useEffect(() => {
+    if (students.length > 0) {
+      const first = students[0];
+      const g = cleanDigits(first.grade) || '1';
+      const c = cleanDigits(first.classroom) || '1';
+      const num = cleanDigits(first.number) || '1';
+      setSearchGrade(g);
+      setSearchClassroom(c);
+      setSearchNumber(num);
+      setSearchClassSelect(`${g}학년 ${c}반`);
+
+      const entries = diaries.filter(d => {
+        const matchNum = cleanDigits(d.grade) === g && cleanDigits(d.classroom) === c && cleanDigits(d.number) === num;
+        const matchName = Boolean(d.studentName && first.name && d.studentName.trim() === first.name.trim() && cleanDigits(d.grade) === g);
+        return matchNum || matchName;
+      });
+      setSearchedStudent({ student: first, entries });
+    } else if (diaries.length > 0) {
+      const firstD = diaries[0];
+      const g = cleanDigits(firstD.grade) || '1';
+      const c = cleanDigits(firstD.classroom) || '1';
+      const num = cleanDigits(firstD.number) || '1';
+      setSearchGrade(g);
+      setSearchClassroom(c);
+      setSearchNumber(num);
+      const entries = diaries.filter(d => cleanDigits(d.grade) === g && cleanDigits(d.classroom) === c && cleanDigits(d.number) === num);
+      setSearchedStudent({ student: null, entries });
+    }
+  }, [students, diaries]);
+
+  // Students available for the selected search class dropdown
+  const filteredStudentsForSearch = useMemo(() => {
+    if (searchClassSelect === '전체') {
+      return students.slice(0, 100);
+    }
+    const match = searchClassSelect.match(/(\d+)학년\s*(\d+)반/);
+    if (!match) return students;
+    const g = match[1];
+    const c = match[2];
+    return students
+      .filter(s => cleanDigits(s.grade) === g && cleanDigits(s.classroom) === c)
+      .sort((a, b) => (parseInt(cleanDigits(a.number) || '0', 10) - parseInt(cleanDigits(b.number) || '0', 10)));
+  }, [students, searchClassSelect]);
+
+  const handleSelectStudentFromDropdown = (studentIdKey: string) => {
+    if (!studentIdKey) return;
+    const [g, c, num] = studentIdKey.split('-');
+    const found = students.find(
+      s => cleanDigits(s.grade) === g && cleanDigits(s.classroom) === c && cleanDigits(s.number) === num
+    ) || null;
+
+    setSearchGrade(g);
+    setSearchClassroom(c);
+    setSearchNumber(num);
+    if (found) {
+      setSearchClassSelect(`${g}학년 ${c}반`);
+    }
+
+    const entries = diaries.filter(d => {
+      const matchNum = cleanDigits(d.grade) === g && cleanDigits(d.classroom) === c && cleanDigits(d.number) === num;
+      const matchName = Boolean(found && d.studentName && found.name && d.studentName.trim() === found.name.trim() && cleanDigits(d.grade) === g);
+      return matchNum || matchName;
+    });
+
+    setSearchedStudent({ student: found, entries });
+  };
+
+  const handleSearchStudent = () => {
+    const g = cleanDigits(searchGrade);
+    const c = cleanDigits(searchClassroom);
+    const num = cleanDigits(searchNumber);
+    const trimmedName = searchNameInput.trim().toLowerCase();
+
+    let found: Student | null = null;
+    if (trimmedName) {
+      found = students.find(s => s.name.toLowerCase().includes(trimmedName)) || null;
+      if (found) {
+        setSearchGrade(cleanDigits(found.grade) || g);
+        setSearchClassroom(cleanDigits(found.classroom) || c);
+        setSearchNumber(cleanDigits(found.number) || num);
+        setSearchClassSelect(`${cleanDigits(found.grade)}학년 ${cleanDigits(found.classroom)}반`);
+      }
+    }
+
+    if (!found) {
+      found = students.find(
+        s => cleanDigits(s.grade) === g && cleanDigits(s.classroom) === c && cleanDigits(s.number) === num
+      ) || null;
+    }
+
+    const curG = found ? cleanDigits(found.grade) : g;
+    const curC = found ? cleanDigits(found.classroom) : c;
+    const curNum = found ? cleanDigits(found.number) : num;
+    const curName = found ? found.name : trimmedName;
+
+    const entries = diaries.filter(d => {
+      const dG = cleanDigits(d.grade);
+      const dC = cleanDigits(d.classroom);
+      const dNum = cleanDigits(d.number);
+      const matchNum = dG === curG && dC === curC && dNum === curNum;
+      const matchName = Boolean(curName && d.studentName && d.studentName.trim().toLowerCase() === curName.toLowerCase() && (!curG || dG === curG));
+      return matchNum || matchName;
+    });
+
+    setSearchedStudent({ student: found, entries });
+  };
 
   // Calculate metrics
   const participation = computeParticipationRate(students, diaries, selectedClass, selectedPeriod);
@@ -139,28 +308,14 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
 
   const totalMoodCount = Object.values(moodDistribution).reduce((a, b) => a + b, 0);
 
-  // Class options derived from students list
-  const classOptions = [
-    '전체',
-    '1학년 1반',
-    '1학년 2반',
-    '2학년 1반',
-    '2학년 3반',
-    '3학년 1반',
-    '3학년 2반'
-  ];
+  // Period analysis check (e.g. 9월 vs 전체/6월)
+  const currentPeriodDiaries = useMemo(() => {
+    return filterDiaries(diaries, selectedClass, selectedPeriod);
+  }, [diaries, selectedClass, selectedPeriod]);
 
-  const handleSearchStudent = () => {
-    const found = students.find(
-      s => s.grade === searchGrade && s.classroom === searchClassroom && s.number === searchNumber
-    ) || null;
-
-    const entries = diaries.filter(
-      d => d.grade === searchGrade && d.classroom === searchClassroom && d.number === searchNumber
-    );
-
-    setSearchedStudent({ student: found, entries });
-  };
+  const allPeriodDiaries = useMemo(() => {
+    return filterDiaries(diaries, selectedClass, '전체');
+  }, [diaries, selectedClass]);
 
   return (
     <div className="space-y-6">
@@ -207,6 +362,18 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
+            {onSyncGoogleSheets && (
+              <button
+                onClick={handleTriggerSync}
+                disabled={isSyncing}
+                className="px-3 py-1.5 rounded-xl border text-xs font-black flex items-center gap-1.5 transition shadow-2xs cursor-pointer bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-50"
+                title="구글 시트(명렬표 및 DiaryData) 최신 데이터를 즉시 동기화합니다"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
+                <span>{isSyncing ? '동기화 중...' : '시트 즉시 동기화'}</span>
+              </button>
+            )}
+
             <button
               onClick={() => setIsPasswordModalOpen(true)}
               className={`px-3 py-1.5 rounded-xl border text-xs font-black flex items-center gap-1.5 transition shadow-2xs cursor-pointer ${
@@ -248,6 +415,14 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           </div>
         </div>
 
+        {/* Sync Feedback Toast */}
+        {syncFeedback && (
+          <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-2xl text-xs text-emerald-900 font-bold flex items-center gap-2 animate-fadeIn">
+            <Check className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+            <span>{syncFeedback}</span>
+          </div>
+        )}
+
         {/* Filters */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
           {/* Class Filter */}
@@ -284,6 +459,31 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
             ))}
           </div>
         </div>
+
+        {/* Period Notice (e.g. 9월 vs 6월 DiaryData 이전 데이터) */}
+        {currentPeriodDiaries.length === 0 && allPeriodDiaries.length > 0 && (
+          <div className="p-3.5 bg-blue-50/90 border border-blue-200/90 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-blue-950 shadow-2xs">
+            <div className="flex items-center gap-2.5">
+              <span className="p-2 rounded-xl bg-blue-100 text-blue-700 flex-shrink-0 text-base">
+                📅
+              </span>
+              <div>
+                <span className="font-black block">
+                  선택하신 기간({selectedPeriod})에는 작성된 기록이 없습니다.
+                </span>
+                <span className="text-blue-800 text-[11px]">
+                  구글 시트(DiaryData)에 보관된 과거 기록(6월 등 총 {allPeriodDiaries.length}건)을 보시려면 기간을 변경해 주세요.
+                </span>
+              </div>
+            </div>
+            <button
+              onClick={() => setSelectedPeriod('전체')}
+              className="px-3.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-black text-xs transition shadow-2xs cursor-pointer whitespace-nowrap self-end sm:self-center"
+            >
+              전체 기간으로 보기 ➡️
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Row 1: Metrics Cards */}
@@ -505,93 +705,195 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           </p>
         </div>
 
-        {/* Search Inputs */}
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="flex items-center gap-1.5 bg-stone-50 px-3 py-1.5 rounded-xl border border-stone-200">
-            <span className="text-xs font-bold text-stone-500">학년</span>
-            <input
-              type="text"
-              value={searchGrade}
-              onChange={e => setSearchGrade(e.target.value)}
-              className="w-10 text-xs font-bold p-1 text-center bg-white border border-stone-300 rounded-md"
-            />
+        {/* Roster & Search Controls */}
+        <div className="space-y-3 bg-stone-50/70 p-4 rounded-2xl border border-stone-200">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {/* 1. Class Roster Filter */}
+            <div className="space-y-1">
+              <label className="text-[11px] font-bold text-stone-500 block">
+                1. 학급 선택 (명렬표 연동)
+              </label>
+              <select
+                value={searchClassSelect}
+                onChange={e => {
+                  const val = e.target.value;
+                  setSearchClassSelect(val);
+                  const m = val.match(/(\d+)학년\s*(\d+)반/);
+                  if (m) {
+                    setSearchGrade(m[1]);
+                    setSearchClassroom(m[2]);
+                  }
+                }}
+                className="w-full bg-white text-xs font-bold p-2.5 rounded-xl border border-stone-200 focus:ring-2 focus:ring-emerald-400 focus:outline-none"
+              >
+                {classOptions.map(opt => (
+                  <option key={opt} value={opt}>
+                    {opt}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* 2. Student Select from Roster */}
+            <div className="space-y-1">
+              <label className="text-[11px] font-bold text-stone-500 block">
+                2. 명렬표 학생 선택 ({filteredStudentsForSearch.length}명)
+              </label>
+              <select
+                value={
+                  searchedStudent?.student
+                    ? `${cleanDigits(searchedStudent.student.grade)}-${cleanDigits(searchedStudent.student.classroom)}-${cleanDigits(searchedStudent.student.number)}`
+                    : `${cleanDigits(searchGrade)}-${cleanDigits(searchClassroom)}-${cleanDigits(searchNumber)}`
+                }
+                onChange={e => handleSelectStudentFromDropdown(e.target.value)}
+                className="w-full bg-white text-xs font-bold p-2.5 rounded-xl border border-stone-200 focus:ring-2 focus:ring-emerald-400 focus:outline-none"
+              >
+                <option value="">-- 학생을 선택해 주세요 --</option>
+                {filteredStudentsForSearch.map(s => {
+                  const sG = cleanDigits(s.grade);
+                  const sC = cleanDigits(s.classroom);
+                  const sNum = cleanDigits(s.number);
+                  const recCount = diaries.filter(d => {
+                    const matchNum = cleanDigits(d.grade) === sG && cleanDigits(d.classroom) === sC && cleanDigits(d.number) === sNum;
+                    const matchName = Boolean(d.studentName && s.name && d.studentName.trim() === s.name.trim() && cleanDigits(d.grade) === sG);
+                    return matchNum || matchName;
+                  }).length;
+
+                  return (
+                    <option key={`${sG}-${sC}-${sNum}`} value={`${sG}-${sC}-${sNum}`}>
+                      {s.grade}학년 {s.classroom}반 {s.number}번 {s.name} (기록 {recCount}건)
+                    </option>
+                  );
+                })}
+              </select>
+            </div>
           </div>
 
-          <div className="flex items-center gap-1.5 bg-stone-50 px-3 py-1.5 rounded-xl border border-stone-200">
-            <span className="text-xs font-bold text-stone-500">반</span>
-            <input
-              type="text"
-              value={searchClassroom}
-              onChange={e => setSearchClassroom(e.target.value)}
-              className="w-10 text-xs font-bold p-1 text-center bg-white border border-stone-300 rounded-md"
-            />
-          </div>
+          {/* 3. Quick Name or Number Search Row */}
+          <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-stone-200/60">
+            <div className="flex-1 min-w-[140px] flex items-center gap-1.5 bg-white px-3 py-1.5 rounded-xl border border-stone-200">
+              <Search className="w-3.5 h-3.5 text-stone-400" />
+              <input
+                type="text"
+                placeholder="학생 이름으로 직접 검색..."
+                value={searchNameInput}
+                onChange={e => setSearchNameInput(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') handleSearchStudent();
+                }}
+                className="w-full text-xs font-bold bg-transparent outline-none"
+              />
+            </div>
 
-          <div className="flex items-center gap-1.5 bg-stone-50 px-3 py-1.5 rounded-xl border border-stone-200">
-            <span className="text-xs font-bold text-stone-500">번호</span>
-            <input
-              type="text"
-              value={searchNumber}
-              onChange={e => setSearchNumber(e.target.value)}
-              className="w-12 text-xs font-bold p-1 text-center bg-white border border-stone-300 rounded-md"
-            />
-          </div>
+            <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1 bg-white px-2 py-1.5 rounded-xl border border-stone-200">
+                <span className="text-[10px] font-bold text-stone-400">학년</span>
+                <input
+                  type="text"
+                  value={searchGrade}
+                  onChange={e => setSearchGrade(e.target.value)}
+                  className="w-7 text-xs font-bold text-center outline-none"
+                />
+              </div>
+              <div className="flex items-center gap-1 bg-white px-2 py-1.5 rounded-xl border border-stone-200">
+                <span className="text-[10px] font-bold text-stone-400">반</span>
+                <input
+                  type="text"
+                  value={searchClassroom}
+                  onChange={e => setSearchClassroom(e.target.value)}
+                  className="w-7 text-xs font-bold text-center outline-none"
+                />
+              </div>
+              <div className="flex items-center gap-1 bg-white px-2 py-1.5 rounded-xl border border-stone-200">
+                <span className="text-[10px] font-bold text-stone-400">번</span>
+                <input
+                  type="text"
+                  value={searchNumber}
+                  onChange={e => setSearchNumber(e.target.value)}
+                  className="w-8 text-xs font-bold text-center outline-none"
+                />
+              </div>
+            </div>
 
-          <button
-            onClick={handleSearchStudent}
-            className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold shadow-xs transition"
-          >
-            조회하기
-          </button>
+            <button
+              onClick={handleSearchStudent}
+              className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold shadow-2xs transition cursor-pointer"
+            >
+              조회하기
+            </button>
+          </div>
         </div>
 
         {/* Search Result */}
         {searchedStudent && (
           <div className="p-5 rounded-2xl bg-stone-50/80 border border-stone-200 space-y-4">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-stone-200/70 pb-3">
               <div>
                 <span className="text-xs font-bold text-stone-400">
                   {searchGrade}학년 {searchClassroom}반 {searchNumber}번
                 </span>
-                <h4 className="text-base font-extrabold text-[#123b5d]">
-                  {searchedStudent.student ? `${searchedStudent.student.name} 학생` : '미등록 학생'}
+                <h4 className="text-lg font-black text-[#123b5d] flex items-center gap-2">
+                  <span>{searchedStudent.student ? `${searchedStudent.student.name} 학생` : '미등록 학생'}</span>
+                  {searchedStudent.student && (
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800 border border-emerald-200">
+                      명렬표 연동됨
+                    </span>
+                  )}
                 </h4>
               </div>
-              <span className="text-xs font-bold px-3 py-1 rounded-full bg-white border border-stone-200 text-stone-700">
-                기록 총 {searchedStudent.entries.length}일
-              </span>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs font-bold px-3 py-1 rounded-full bg-white border border-stone-200 text-stone-700 shadow-2xs">
+                  총 기록: <strong>{searchedStudent.entries.length}일</strong>
+                </span>
+              </div>
             </div>
 
-            {/* Individual student trend chart */}
+            {/* Individual student trend & entries */}
             {searchedStudent.entries.length === 0 ? (
-              <div className="p-6 text-center text-xs text-stone-400 bg-white rounded-xl border border-stone-200">
-                해당 학생의 기록된 마음 데이터가 없습니다.
+              <div className="p-8 text-center text-xs text-stone-400 bg-white rounded-xl border border-stone-200 space-y-1">
+                <p className="font-bold text-stone-600">해당 학생의 작성된 마음일기 기록이 없습니다.</p>
+                <p className="text-[11px] text-stone-400">학생이 일기를 작성하거나 구글 시트(DiaryData)에 이전 기록이 연동되면 이곳에 나타납니다.</p>
               </div>
             ) : (
-              <div className="bg-white p-4 rounded-xl border border-stone-200 space-y-2">
-                <span className="text-xs font-bold text-stone-600 block">
-                  마음 날씨 히스토리
-                </span>
-                <div className="flex flex-wrap gap-2">
-                  {searchedStudent.entries.map(entry => {
-                    const q = entry.moodType?.charAt(0) as 'A' | 'B' | 'C' | 'D';
-                    const conf = QUADRANT_CONFIGS[q] || QUADRANT_CONFIGS.B;
+              <div className="bg-white p-4 rounded-xl border border-stone-200 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-stone-600 block">
+                    마음 날씨 히스토리 ({searchedStudent.entries.length}건)
+                  </span>
+                  <span className="text-[11px] text-stone-400 font-medium">
+                    최근 작성순 정렬
+                  </span>
+                </div>
+                
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  {searchedStudent.entries
+                    .sort((a, b) => (b.dateStr || '').localeCompare(a.dateStr || ''))
+                    .map(entry => {
+                      const q = (entry.moodType?.charAt(0) || 'B') as 'A' | 'B' | 'C' | 'D';
+                      const conf = QUADRANT_CONFIGS[q] || QUADRANT_CONFIGS.B;
 
-                    return (
-                      <div
-                        key={entry.id}
-                        className={`px-3 py-2 rounded-xl border text-xs font-bold flex items-center gap-2 ${conf.cardBg} ${conf.borderColor}`}
-                      >
-                        <span>{conf.icon}</span>
-                        <div className="flex flex-col">
-                          <span className="text-[10px] text-stone-400">
-                            {formatShortDate(entry.dateStr)}
+                      return (
+                        <div
+                          key={entry.id}
+                          className={`p-3 rounded-xl border text-xs flex items-center justify-between gap-2 shadow-2xs ${conf.cardBg} ${conf.borderColor}`}
+                        >
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <span className="text-lg flex-shrink-0">{conf.icon}</span>
+                            <div className="flex flex-col min-w-0">
+                              <span className="text-[11px] font-black text-stone-500">
+                                {formatKoreanDate(entry.dateStr)}
+                              </span>
+                              <span className="text-sm font-extrabold text-[#123b5d] truncate">
+                                {entry.emotionWord}
+                              </span>
+                            </div>
+                          </div>
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${conf.cardBg} ${conf.borderColor} text-stone-700`}>
+                            {entry.moodType}
                           </span>
-                          <span className="text-[#123b5d]">{entry.emotionWord} ({entry.moodType})</span>
                         </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
                 </div>
               </div>
             )}
