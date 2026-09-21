@@ -19,6 +19,34 @@ export function setGoogleSheetsUrl(url: string): void {
 }
 
 /**
+ * Initialize Google Sheets URL from query string (?gas=... or ?sheet=...)
+ * This allows teachers to share a unique link with their students so student devices automatically bind to the correct sheet.
+ */
+export function initGoogleSheetsUrlFromQuery(): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const gasParam = params.get('gas') || params.get('sheet');
+    if (gasParam && gasParam.startsWith('https://script.google.com/macros/s/')) {
+      setGoogleSheetsUrl(gasParam);
+      return gasParam;
+    }
+  } catch (e) {
+    // Ignore URL parsing errors
+  }
+  return null;
+}
+
+/**
+ * Build shareable link for students with the current GAS URL embedded
+ */
+export function buildDistributionUrl(gasUrl: string): string {
+  if (typeof window === 'undefined' || !gasUrl) return '';
+  const baseUrl = `${window.location.origin}${window.location.pathname}`;
+  return `${baseUrl}?gas=${encodeURIComponent(gasUrl.trim())}`;
+}
+
+/**
  * Send diary entry to Google Apps Script Web App
  * Uses no-cors mode to safely bypass browser CORS restrictions for Google Apps Script POST
  */

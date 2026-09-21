@@ -13,7 +13,8 @@ import {
   syncDiaryToGoogleSheets,
   fetchStudentsFromGoogleSheets,
   fetchDiariesFromGoogleSheets,
-  getGoogleSheetsUrl
+  getGoogleSheetsUrl,
+  initGoogleSheetsUrlFromQuery
 } from './utils/googleSheets';
 import { QUADRANT_CONFIGS } from './data/mockData';
 import { Header } from './components/Header';
@@ -73,6 +74,7 @@ export default function App() {
 
   // Auto-sync students roster and historical diaries from Google Sheets if URL is saved
   useEffect(() => {
+    initGoogleSheetsUrlFromQuery();
     const url = getGoogleSheetsUrl();
     if (url) {
       // 1. Fetch Students Roster

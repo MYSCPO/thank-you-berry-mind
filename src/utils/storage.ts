@@ -79,6 +79,18 @@ export function getAdminPassword(): string {
   }
 }
 
+export function setAdminPassword(newPassword: string): void {
+  try {
+    localStorage.setItem(STORAGE_KEYS.ADMIN_PW, newPassword.trim());
+  } catch (e) {
+    console.error('Failed to update admin password', e);
+  }
+}
+
+export function isDefaultAdminPassword(): boolean {
+  return getAdminPassword() === 'admin1234';
+}
+
 // Clean date formatting without ugly ISO or timezone strings
 export function formatShortDate(dateVal?: string | Date | null): string {
   if (!dateVal) return '';

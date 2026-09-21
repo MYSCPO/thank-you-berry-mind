@@ -7,17 +7,20 @@ import {
   computeEmotionWordCloud,
   computeGratitudeKeywordCloud,
   formatShortDate,
-  formatKoreanDate
+  formatKoreanDate,
+  isDefaultAdminPassword
 } from '../utils/storage';
 import {
   getGoogleSheetsUrl,
   setGoogleSheetsUrl,
   testGoogleSheetsConnection,
+  buildDistributionUrl,
   GAS_CODE_TEMPLATE
 } from '../utils/googleSheets';
 import { QUADRANT_CONFIGS } from '../data/mockData';
 import { WordCloud } from './WordCloud';
 import { RosterModal } from './RosterModal';
+import { PasswordModal } from './PasswordModal';
 import {
   Users,
   CheckCircle2,
@@ -35,7 +38,8 @@ import {
   ExternalLink,
   Copy,
   Check,
-  Send
+  Send,
+  Share2
 } from 'lucide-react';
 
 interface TeacherDashboardProps {
@@ -59,11 +63,32 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   const [isRosterModalOpen, setIsRosterModalOpen] = useState(false);
   const [sheetsUrlInput, setSheetsUrlInput] = useState('');
   const [isCopiedCode, setIsCopiedCode] = useState(false);
+  const [isCopiedDistributionLink, setIsCopiedDistributionLink] = useState(false);
   const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'success' | 'fail'>('idle');
+
+  // Teacher Password modal state
+  const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
+  const [isInitialPasswordCheck, setIsInitialPasswordCheck] = useState(false);
 
   useEffect(() => {
     setSheetsUrlInput(getGoogleSheetsUrl());
+    // If still using default password 'admin1234', prompt to set a custom password
+    if (isDefaultAdminPassword()) {
+      setIsInitialPasswordCheck(true);
+      setIsPasswordModalOpen(true);
+    }
   }, []);
+
+  const handleCopyDistributionLink = () => {
+    if (!sheetsUrlInput.trim()) {
+      alert('먼저 Google Apps Script 웹 앱 URL을 입력하고 저장해 주세요.');
+      return;
+    }
+    const distUrl = buildDistributionUrl(sheetsUrlInput);
+    navigator.clipboard.writeText(distUrl);
+    setIsCopiedDistributionLink(true);
+    setTimeout(() => setIsCopiedDistributionLink(false), 2500);
+  };
 
   const handleSaveSheetsUrl = () => {
     setGoogleSheetsUrl(sheetsUrlInput);
@@ -139,6 +164,31 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
 
   return (
     <div className="space-y-6">
+      {/* Default Password Reminder Banner */}
+      {isDefaultAdminPassword() && (
+        <div className="bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200/90 rounded-3xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-amber-950 shadow-xs">
+          <div className="flex items-center gap-3">
+            <span className="p-2.5 rounded-2xl bg-amber-100 text-amber-700 flex-shrink-0">
+              <Lock className="w-5 h-5" />
+            </span>
+            <div>
+              <span className="font-black text-sm block text-amber-950">
+                현재 교사 인증 초기 비밀번호(admin1234)를 사용 중입니다
+              </span>
+              <span className="text-xs text-amber-800 leading-snug">
+                학생들의 대시보드 무단 접근을 방지하고 학급 데이터를 안전하게 보호하기 위해 선생님만의 비밀번호로 변경해 주세요.
+              </span>
+            </div>
+          </div>
+          <button
+            onClick={() => setIsPasswordModalOpen(true)}
+            className="px-4 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-black text-xs transition shadow-xs cursor-pointer flex-shrink-0"
+          >
+            비밀번호 설정하기 🔒
+          </button>
+        </div>
+      )}
+
       {/* Top Banner & Filters */}
       <div className="bg-white rounded-3xl p-6 sm:p-7 shadow-sm border border-stone-200/80 space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-stone-100 pb-4">
@@ -157,6 +207,23 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
+            <button
+              onClick={() => setIsPasswordModalOpen(true)}
+              className={`px-3 py-1.5 rounded-xl border text-xs font-black flex items-center gap-1.5 transition shadow-2xs cursor-pointer ${
+                isDefaultAdminPassword()
+                  ? 'bg-amber-50 hover:bg-amber-100 border-amber-300 text-amber-900'
+                  : 'bg-white hover:bg-stone-50 border-stone-300 text-stone-700'
+              }`}
+            >
+              <Lock className="w-3.5 h-3.5 text-stone-600" />
+              <span>비밀번호 관리</span>
+              {isDefaultAdminPassword() && (
+                <span className="text-[10px] bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded font-bold">
+                  초기값
+                </span>
+              )}
+            </button>
+
             <button
               onClick={() => setIsRosterModalOpen(true)}
               className="px-3 py-1.5 rounded-xl border text-xs font-black flex items-center gap-1.5 transition shadow-2xs cursor-pointer bg-white hover:bg-stone-50 border-blue-300 text-blue-800"
@@ -605,6 +672,39 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
               </div>
             </div>
 
+            {/* Shareable Link Box for Teachers & Students */}
+            {sheetsUrlInput && (
+              <div className="bg-emerald-50/80 p-4 rounded-2xl border border-emerald-200/90 space-y-2.5">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div className="flex items-center gap-1.5 text-xs font-black text-emerald-950">
+                    <Share2 className="w-4 h-4 text-emerald-700 flex-shrink-0" />
+                    <span>우리 반 학생 배포용 링크 (시트 자동연동)</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleCopyDistributionLink}
+                    className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-xs cursor-pointer"
+                  >
+                    {isCopiedDistributionLink ? (
+                      <>
+                        <Check className="w-3.5 h-3.5" />
+                        <span>링크 복사완료!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3.5 h-3.5" />
+                        <span>학생 공유 링크 복사</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+                <p className="text-[11px] text-emerald-800 leading-relaxed">
+                  💡 <strong>다른 선생님이나 반별로 사용할 때 어떻게 하나요?</strong><br />
+                  이 링크를 복사하여 학생들에게 전달하시면, 학생 기기에서 별도 입력 없이 선생님의 구글 시트로 자동 연결되어 데이터가 100% 분리 수집됩니다. 다른 선생님도 본인 구글 시트 URL을 넣고 해당 반 전용 링크를 만들어 배포하시면 학생들의 데이터가 서로 절대 엉키지 않습니다!
+                </p>
+              </div>
+            )}
+
             {/* Quick 1-minute Step by Step Guide */}
             <div className="space-y-2.5 text-xs text-stone-700">
               <h4 className="font-black text-stone-900 text-sm flex items-center gap-1.5">
@@ -765,6 +865,16 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           </div>
         </div>
       )}
+
+      {/* Password Management Modal */}
+      <PasswordModal
+        isOpen={isPasswordModalOpen}
+        onClose={() => {
+          setIsPasswordModalOpen(false);
+          setIsInitialPasswordCheck(false);
+        }}
+        isInitialPrompt={isInitialPasswordCheck}
+      />
     </div>
   );
 };

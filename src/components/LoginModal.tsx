@@ -90,7 +90,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       setTeacherError('');
       onLoginTeacher();
     } else {
-      setTeacherError('비밀번호가 일치하지 않습니다. (기본값: admin1234)');
+      setTeacherError('비밀번호가 일치하지 않습니다. 다시 확인해 주세요.');
     }
   };
 
@@ -252,12 +252,12 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                 type="password"
                 value={password}
                 onChange={e => setPassword(e.target.value)}
-                placeholder="비밀번호 입력 (기본: admin1234)"
+                placeholder="비밀번호 입력 (초기: admin1234)"
                 className="w-full text-sm font-bold p-3.5 rounded-xl border border-stone-200 bg-white focus:ring-2 focus:ring-emerald-400 focus:outline-none min-h-[46px]"
                 required
               />
               <span className="text-[11px] text-stone-400 block mt-1.5">
-                체험용 기본 비밀번호: <strong className="text-emerald-700">admin1234</strong>
+                초기 비밀번호: <strong className="text-emerald-700">admin1234</strong> (로그인 후 비밀번호 변경 가능)
               </span>
             </div>
 
@@ -273,17 +273,6 @@ export const LoginModal: React.FC<LoginModalProps> = ({
               className="w-full py-3.5 sm:py-4 rounded-2xl font-bold text-base bg-emerald-600 hover:bg-emerald-700 text-white shadow-lg shadow-emerald-200/80 transition cursor-pointer min-h-[48px] mt-2"
             >
               선생님 대시보드 입장 🌿
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                setPassword('admin1234');
-                onLoginTeacher();
-              }}
-              className="w-full py-2.5 text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 rounded-xl border border-emerald-200 transition min-h-[44px]"
-            >
-              원클릭 교사 로그인 바로가기
             </button>
           </form>
         )}
