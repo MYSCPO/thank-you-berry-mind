@@ -22,6 +22,14 @@ export function getStoredStudents(): Student[] {
   }
 }
 
+export function saveStoredStudents(students: Student[]): void {
+  try {
+    localStorage.setItem(STORAGE_KEYS.STUDENTS, JSON.stringify(students));
+  } catch (e) {
+    console.error('Failed to save students to localStorage', e);
+  }
+}
+
 export function getStoredDiaries(): DiaryEntry[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.DIARIES);
@@ -32,6 +40,14 @@ export function getStoredDiaries(): DiaryEntry[] {
     return JSON.parse(raw);
   } catch (e) {
     return INITIAL_DIARIES;
+  }
+}
+
+export function saveStoredDiaries(diaries: DiaryEntry[]): void {
+  try {
+    localStorage.setItem(STORAGE_KEYS.DIARIES, JSON.stringify(diaries));
+  } catch (e) {
+    console.error('Failed to save diaries to localStorage', e);
   }
 }
 

@@ -2,12 +2,19 @@ import React, { useState, useEffect } from 'react';
 import { Student, DiaryEntry, QuadrantId, MoodType } from './types';
 import {
   getStoredStudents,
+  saveStoredStudents,
   getStoredDiaries,
+  saveStoredDiaries,
   saveDiary,
   getTodayStr,
   formatShortDate
 } from './utils/storage';
-import { syncDiaryToGoogleSheets } from './utils/googleSheets';
+import {
+  syncDiaryToGoogleSheets,
+  fetchStudentsFromGoogleSheets,
+  fetchDiariesFromGoogleSheets,
+  getGoogleSheetsUrl
+} from './utils/googleSheets';
 import { QUADRANT_CONFIGS } from './data/mockData';
 import { Header } from './components/Header';
 import { LoginModal } from './components/LoginModal';
@@ -37,11 +44,8 @@ export default function App() {
   const [students, setStudents] = useState<Student[]>(() => getStoredStudents());
   const [diaries, setDiaries] = useState<DiaryEntry[]>(() => getStoredDiaries());
 
-  // Default logged in as demo student (김하은) so preview is immediately functional!
-  const [currentStudent, setCurrentStudent] = useState<Student | null>(() => {
-    const list = getStoredStudents();
-    return list.find(s => s.grade === '2' && s.classroom === '3' && s.number === '7') || list[0] || null;
-  });
+  // Current student login state (null when starting afresh, opens clean login modal)
+  const [currentStudent, setCurrentStudent] = useState<Student | null>(null);
   const [isTeacher, setIsTeacher] = useState<boolean>(false);
 
   // Student flow state
@@ -66,6 +70,33 @@ export default function App() {
           d.number === currentStudent.number
       )
     : [];
+
+  // Auto-sync students roster and historical diaries from Google Sheets if URL is saved
+  useEffect(() => {
+    const url = getGoogleSheetsUrl();
+    if (url) {
+      // 1. Fetch Students Roster
+      fetchStudentsFromGoogleSheets(url).then(res => {
+        if (res.success && res.students && res.students.length > 0) {
+          setStudents(res.students);
+          saveStoredStudents(res.students);
+        }
+      });
+
+      // 2. Fetch Historical Diaries (감사일기_수집)
+      fetchDiariesFromGoogleSheets(url).then(res => {
+        if (res.success && res.diaries && res.diaries.length > 0) {
+          setDiaries(res.diaries);
+          saveStoredDiaries(res.diaries);
+        }
+      });
+    }
+  }, []);
+
+  const handleUpdateStudents = (newStudents: Student[]) => {
+    setStudents(newStudents);
+    saveStoredStudents(newStudents);
+  };
 
   const handleLoginStudent = (student: Student) => {
     setCurrentStudent(student);
@@ -186,7 +217,11 @@ export default function App() {
       <main className="flex-1 max-w-4xl w-full mx-auto px-4 py-5 sm:py-7">
         {isTeacher ? (
           <div className="space-y-4">
-            <TeacherDashboard students={students} diaries={diaries} />
+            <TeacherDashboard
+              students={students}
+              diaries={diaries}
+              onUpdateStudents={handleUpdateStudents}
+            />
           </div>
         ) : (
           <div className="space-y-5">

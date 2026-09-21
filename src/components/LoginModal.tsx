@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Student } from '../types';
 import { getAdminPassword } from '../utils/storage';
-import { User, Shield, Sparkles, Check, AlertCircle } from 'lucide-react';
+import { AlertCircle } from 'lucide-react';
 
 interface LoginModalProps {
   students: Student[];
@@ -17,10 +17,54 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   const [role, setRole] = useState<'student' | 'teacher'>('student');
 
   // Student manual input
-  const [grade, setGrade] = useState('2');
-  const [classroom, setClassroom] = useState('3');
-  const [number, setNumber] = useState('7');
-  const [name, setName] = useState('김하은');
+  const [grade, setGrade] = useState(() => (students[0]?.grade || '1'));
+  const [classroom, setClassroom] = useState(() => (students[0]?.classroom || '1'));
+  const [number, setNumber] = useState('');
+  const [name, setName] = useState('');
+
+  // Auto-adjust grade & classroom when students prop changes
+  useEffect(() => {
+    if (students.length > 0) {
+      const grades = Array.from(new Set(students.map(s => s.grade))).sort();
+      if (!grades.includes(grade) && grades[0]) {
+        setGrade(grades[0]);
+      }
+    }
+  }, [students, grade]);
+
+  // Available grades across all registered students
+  const availableGrades = useMemo(() => {
+    const grades = Array.from(new Set(students.map(s => s.grade))).sort();
+    return grades.length > 0 ? grades : ['1', '2', '3'];
+  }, [students]);
+
+  // Available classes for current grade
+  const availableClasses = useMemo(() => {
+    const classes = Array.from(
+      new Set(students.filter(s => s.grade === grade).map(s => s.classroom))
+    ).sort((a, b) => Number(a) - Number(b));
+    return classes.length > 0 ? classes : ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'];
+  }, [students, grade]);
+
+  // Available numbers: from class roster or standard 1~35 list
+  const availableNumbers = useMemo(() => {
+    const classStudents = students.filter(s => s.grade === grade && s.classroom === classroom);
+    const numbersFromRoster = classStudents.map(s => Number(s.number)).filter(n => !isNaN(n) && n > 0);
+    const maxNum = numbersFromRoster.length > 0 ? Math.max(35, ...numbersFromRoster) : 35;
+    return Array.from({ length: maxNum }, (_, i) => String(i + 1));
+  }, [students, grade, classroom]);
+
+  // Handle number select change
+  const handleNumberSelect = (val: string) => {
+    setNumber(val);
+    // If student exists in roster with matching grade, classroom, and number, auto-populate name
+    const found = students.find(
+      s => s.grade === grade && s.classroom === classroom && s.number === val
+    );
+    if (found) {
+      setName(found.name);
+    }
+  };
 
   // Teacher input
   const [password, setPassword] = useState('');
@@ -31,9 +75,9 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     if (!name.trim()) return;
 
     const student: Student = {
-      grade: grade.trim(),
-      classroom: classroom.trim(),
-      number: number.trim(),
+      grade: grade.trim() || '1',
+      classroom: classroom.trim() || '1',
+      number: number.trim() || '1',
       name: name.trim()
     };
     onLoginStudent(student);
@@ -50,46 +94,45 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     }
   };
 
-  const selectPresetStudent = (preset: Student) => {
-    setGrade(preset.grade);
-    setClassroom(preset.classroom);
-    setNumber(preset.number);
-    setName(preset.name);
-    onLoginStudent(preset);
-  };
-
   return (
     <div className="min-h-[85vh] flex items-center justify-center p-4">
-      <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-md w-full shadow-xl border border-stone-200 space-y-6">
+      <div className="bg-white rounded-[32px] p-6 sm:p-8 max-w-md w-full shadow-xl border border-stone-200/80">
         {/* App Title & Greeting */}
-        <div className="text-center space-y-2">
-          <div className="w-16 h-16 mx-auto rounded-3xl bg-rose-50 border border-rose-200 flex items-center justify-center text-3xl shadow-inner">
+        <div className="text-center">
+          <div className="w-14 h-14 mx-auto rounded-2xl bg-rose-50 border border-rose-100 flex items-center justify-center text-3xl mb-3 shadow-xs">
             🍓
           </div>
-          <h2 className="text-2xl font-black text-[#123b5d] tracking-tight">
+          <h2 className="text-2xl sm:text-3xl font-black text-[#123b5d] tracking-tight mb-2">
             땡큐베리마인드
           </h2>
-          <p className="text-xs sm:text-sm text-stone-500 font-medium">
-            오늘 나의 마음 날씨를 살피고 감사일기를 기록해요
+          <p className="text-xs sm:text-sm text-stone-500 font-medium leading-relaxed">
+            오늘의 마음 날씨를 기록하고<br />
+            감사의 씨앗을 키워보세요
           </p>
+
+          {/* Sprout divider */}
+          <div className="flex items-center justify-center my-4">
+            <div className="h-px bg-stone-200 w-16"></div>
+            <span className="px-2 text-base">🌱</span>
+            <div className="h-px bg-stone-200 w-16"></div>
+          </div>
         </div>
 
         {/* Role Toggle Tabs */}
-        <div className="bg-stone-100 p-1 rounded-2xl flex items-center">
+        <div className="bg-[#f0f3f4] p-1 rounded-2xl flex items-center mb-6">
           <button
             type="button"
             onClick={() => {
               setRole('student');
               setTeacherError('');
             }}
-            className={`flex-1 py-2.5 rounded-xl text-xs sm:text-sm font-extrabold flex items-center justify-center gap-1.5 transition ${
+            className={`flex-1 py-3 rounded-xl text-sm font-bold transition flex items-center justify-center ${
               role === 'student'
                 ? 'bg-white text-[#123b5d] shadow-sm'
-                : 'text-stone-500 hover:text-stone-800'
+                : 'text-stone-400 hover:text-stone-600 font-medium'
             }`}
           >
-            <User className="w-4 h-4" />
-            <span>학생 입장</span>
+            <span>학생 로그인</span>
           </button>
           <button
             type="button"
@@ -97,125 +140,129 @@ export const LoginModal: React.FC<LoginModalProps> = ({
               setRole('teacher');
               setTeacherError('');
             }}
-            className={`flex-1 py-2.5 rounded-xl text-xs sm:text-sm font-extrabold flex items-center justify-center gap-1.5 transition ${
+            className={`flex-1 py-3 rounded-xl text-sm font-bold transition flex items-center justify-center ${
               role === 'teacher'
                 ? 'bg-white text-[#123b5d] shadow-sm'
-                : 'text-stone-500 hover:text-stone-800'
+                : 'text-stone-400 hover:text-stone-600 font-medium'
             }`}
           >
-            <Shield className="w-4 h-4" />
-            <span>선생님 (교사용)</span>
+            <span>교사 로그인</span>
           </button>
         </div>
 
         {role === 'student' ? (
           <form onSubmit={handleStudentSubmit} className="space-y-4">
-            <div className="grid grid-cols-3 gap-2">
-              <div>
-                <label className="text-[11px] font-bold text-stone-500 block mb-1">학년</label>
+            {/* Grade · Class · Number */}
+            <div>
+              <label className="text-xs sm:text-sm font-bold text-[#123b5d] block mb-2">
+                학년 · 반 · 번호
+              </label>
+              <div className="grid grid-cols-3 gap-2">
+                {/* Grade Select */}
                 <select
                   value={grade}
-                  onChange={e => setGrade(e.target.value)}
-                  className="w-full text-xs font-bold p-2.5 rounded-xl border border-stone-300 bg-white focus:ring-2 focus:ring-rose-400 focus:outline-none"
+                  onChange={e => {
+                    const newGrade = e.target.value;
+                    setGrade(newGrade);
+                    const classes = Array.from(
+                      new Set(students.filter(s => s.grade === newGrade).map(s => s.classroom))
+                    );
+                    if (classes.length > 0 && !classes.includes(classroom)) {
+                      setClassroom(classes[0]);
+                    }
+                  }}
+                  className="w-full text-xs sm:text-sm font-medium p-3 rounded-xl border border-stone-200 bg-white text-stone-700 focus:ring-2 focus:ring-rose-400 focus:outline-none min-h-[46px]"
                 >
-                  <option value="1">1학년</option>
-                  <option value="2">2학년</option>
-                  <option value="3">3학년</option>
+                  {availableGrades.map(g => (
+                    <option key={g} value={g}>
+                      {g}학년
+                    </option>
+                  ))}
                 </select>
-              </div>
 
-              <div>
-                <label className="text-[11px] font-bold text-stone-500 block mb-1">반</label>
+                {/* Class Select */}
                 <select
                   value={classroom}
                   onChange={e => setClassroom(e.target.value)}
-                  className="w-full text-xs font-bold p-2.5 rounded-xl border border-stone-300 bg-white focus:ring-2 focus:ring-rose-400 focus:outline-none"
+                  className="w-full text-xs sm:text-sm font-medium p-3 rounded-xl border border-stone-200 bg-white text-stone-700 focus:ring-2 focus:ring-rose-400 focus:outline-none min-h-[46px]"
                 >
-                  {[1, 2, 3, 4, 5, 6, 7, 8].map(c => (
-                    <option key={c} value={String(c)}>
+                  {availableClasses.map(c => (
+                    <option key={c} value={c}>
                       {c}반
                     </option>
                   ))}
                 </select>
-              </div>
 
-              <div>
-                <label className="text-[11px] font-bold text-stone-500 block mb-1">번호</label>
-                <input
-                  type="number"
-                  min="1"
-                  max="40"
+                {/* Number Select */}
+                <select
                   value={number}
-                  onChange={e => setNumber(e.target.value)}
-                  className="w-full text-xs font-bold p-2.5 rounded-xl border border-stone-300 bg-white focus:ring-2 focus:ring-rose-400 focus:outline-none"
-                  required
-                />
+                  onChange={e => handleNumberSelect(e.target.value)}
+                  className="w-full text-xs sm:text-sm font-medium p-3 rounded-xl border border-stone-200 bg-white text-stone-700 focus:ring-2 focus:ring-rose-400 focus:outline-none min-h-[46px]"
+                >
+                  <option value="">번호</option>
+                  {availableNumbers.map(n => (
+                    <option key={n} value={n}>
+                      {n}번
+                    </option>
+                  ))}
+                </select>
               </div>
             </div>
 
+            {/* Name Input */}
             <div>
-              <label className="text-[11px] font-bold text-stone-500 block mb-1">이름</label>
+              <label className="text-xs sm:text-sm font-bold text-[#123b5d] block mb-2">
+                이름
+              </label>
               <input
                 type="text"
                 value={name}
                 onChange={e => setName(e.target.value)}
-                placeholder="학생 이름을 입력하세요"
-                className="w-full text-xs sm:text-sm font-bold p-3 rounded-xl border border-stone-300 bg-white focus:ring-2 focus:ring-rose-400 focus:outline-none"
+                placeholder="이름을 입력하세요"
+                className="w-full text-xs sm:text-sm font-medium p-3.5 rounded-xl border border-stone-200 bg-white text-stone-800 placeholder:text-stone-400 focus:ring-2 focus:ring-rose-400 focus:outline-none min-h-[46px]"
                 required
               />
             </div>
 
-            {/* Quick Demo Preset Students */}
-            <div className="pt-1">
-              <span className="text-[11px] font-bold text-stone-400 block mb-1.5">
-                빠른 체험용 예시 학생:
-              </span>
-              <div className="flex flex-wrap gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => selectPresetStudent({ grade: '2', classroom: '3', number: '7', name: '김하은' })}
-                  className="text-xs px-2.5 py-1 rounded-lg bg-rose-50 text-rose-700 hover:bg-rose-100 font-bold border border-rose-200 transition"
-                >
-                  2-3 7번 김하은 (기록 풍부)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => selectPresetStudent({ grade: '2', classroom: '3', number: '8', name: '장민서' })}
-                  className="text-xs px-2.5 py-1 rounded-lg bg-stone-100 text-stone-700 hover:bg-stone-200 font-bold transition"
-                >
-                  2-3 8번 장민서
-                </button>
-              </div>
-            </div>
-
+            {/* Submit Button */}
             <button
               type="submit"
-              className="w-full py-3.5 rounded-xl font-extrabold text-sm sm:text-base bg-gradient-to-r from-[#f16e7e] to-[#e85c6c] text-white shadow-md hover:shadow-rose-300/60 transition cursor-pointer"
+              className="w-full py-3.5 sm:py-4 rounded-2xl font-bold text-base bg-[#f05c6d] hover:bg-[#e84b5d] text-white shadow-lg shadow-rose-200/80 transition cursor-pointer min-h-[48px] mt-2"
             >
-              마음 날씨 시작하기 🍓
+              기록 시작하기 🍓
             </button>
+
+            {/* Encouraging Note Card */}
+            <div className="bg-[#edf7ee] border border-[#d6ebd8] p-3.5 sm:p-4 rounded-2xl text-center space-y-1 mt-5">
+              <p className="text-xs font-semibold text-stone-700 flex items-center justify-center gap-1">
+                <span>🌱</span> 작은 기록이 쌓여 긍정적인 마음과 자존감을 키워줘요
+              </p>
+              <p className="text-[11px] text-stone-500">
+                선생님도 우리 반의 마음 날씨를 함께 살펴볼 거예요 :)
+              </p>
+            </div>
           </form>
         ) : (
           <form onSubmit={handleTeacherSubmit} className="space-y-4">
             <div>
-              <label className="text-xs font-bold text-stone-600 block mb-1">
-                선생님 인증 비밀번호
+              <label className="text-xs sm:text-sm font-bold text-[#123b5d] block mb-2">
+                교사 인증 비밀번호
               </label>
               <input
                 type="password"
                 value={password}
                 onChange={e => setPassword(e.target.value)}
                 placeholder="비밀번호 입력 (기본: admin1234)"
-                className="w-full text-sm font-bold p-3 rounded-xl border border-stone-300 bg-white focus:ring-2 focus:ring-emerald-400 focus:outline-none"
+                className="w-full text-sm font-bold p-3.5 rounded-xl border border-stone-200 bg-white focus:ring-2 focus:ring-emerald-400 focus:outline-none min-h-[46px]"
                 required
               />
-              <span className="text-[11px] text-stone-400 block mt-1">
-                체험용 비밀번호: <strong className="text-emerald-700">admin1234</strong>
+              <span className="text-[11px] text-stone-400 block mt-1.5">
+                체험용 기본 비밀번호: <strong className="text-emerald-700">admin1234</strong>
               </span>
             </div>
 
             {teacherError && (
-              <div className="flex items-center gap-1.5 text-xs text-rose-600 font-bold bg-rose-50 p-2.5 rounded-xl border border-rose-200">
+              <div className="flex items-center gap-1.5 text-xs text-rose-600 font-bold bg-rose-50 p-3 rounded-xl border border-rose-200">
                 <AlertCircle className="w-4 h-4 flex-shrink-0" />
                 <span>{teacherError}</span>
               </div>
@@ -223,7 +270,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
 
             <button
               type="submit"
-              className="w-full py-3.5 rounded-xl font-extrabold text-sm sm:text-base bg-emerald-600 hover:bg-emerald-700 text-white shadow-md transition cursor-pointer"
+              className="w-full py-3.5 sm:py-4 rounded-2xl font-bold text-base bg-emerald-600 hover:bg-emerald-700 text-white shadow-lg shadow-emerald-200/80 transition cursor-pointer min-h-[48px] mt-2"
             >
               선생님 대시보드 입장 🌿
             </button>
@@ -234,7 +281,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                 setPassword('admin1234');
                 onLoginTeacher();
               }}
-              className="w-full py-2 text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 rounded-xl border border-emerald-200 transition"
+              className="w-full py-2.5 text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 rounded-xl border border-emerald-200 transition min-h-[44px]"
             >
               원클릭 교사 로그인 바로가기
             </button>

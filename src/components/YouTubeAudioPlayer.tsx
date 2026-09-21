@@ -52,6 +52,8 @@ export const YouTubeAudioPlayer: React.FC<YouTubeAudioPlayerProps> = ({
   const playerRef = useRef<YTPlayerInstance | null>(null);
   const containerId = useRef(`yt-audio-player-${Math.random().toString(36).substring(2, 9)}`);
   const isReadyRef = useRef(false);
+  const isPlayingRef = useRef(isPlaying);
+  isPlayingRef.current = isPlaying;
 
   useEffect(() => {
     let isMounted = true;
@@ -63,6 +65,7 @@ export const YouTubeAudioPlayer: React.FC<YouTubeAudioPlayerProps> = ({
         playerRef.current = new window.YT.Player(containerId.current, {
           videoId,
           playerVars: {
+            enablejsapi: 1,
             autoplay: 0,
             controls: 0,
             disablekb: 1,
@@ -77,8 +80,10 @@ export const YouTubeAudioPlayer: React.FC<YouTubeAudioPlayerProps> = ({
               if (!isMounted) return;
               isReadyRef.current = true;
               event.target.setVolume(90);
-              if (isPlaying) {
+              if (isPlayingRef.current) {
                 event.target.playVideo();
+              } else {
+                event.target.pauseVideo();
               }
               onReady?.();
             },
@@ -123,26 +128,66 @@ export const YouTubeAudioPlayer: React.FC<YouTubeAudioPlayerProps> = ({
     return () => {
       isMounted = false;
       try {
+        const container = document.getElementById(containerId.current);
+        const iframe = container?.querySelector('iframe');
+        iframe?.contentWindow?.postMessage(
+          JSON.stringify({ event: 'command', func: 'pauseVideo', args: '' }),
+          '*'
+        );
+        iframe?.contentWindow?.postMessage(
+          JSON.stringify({ event: 'command', func: 'stopVideo', args: '' }),
+          '*'
+        );
+      } catch (e) {}
+      try {
+        playerRef.current?.pauseVideo();
+        playerRef.current?.stopVideo();
         playerRef.current?.destroy();
-      } catch (e) {
-        // ignore
-      }
+      } catch (e) {}
       playerRef.current = null;
       isReadyRef.current = false;
     };
   }, [videoId]);
 
-  // Handle play/pause commands
+  // Handle play/pause commands reliably
   useEffect(() => {
-    if (!playerRef.current || !isReadyRef.current) return;
-    try {
-      if (isPlaying) {
-        playerRef.current.playVideo();
-      } else {
-        playerRef.current.pauseVideo();
+    const container = document.getElementById(containerId.current);
+    const iframe = container?.querySelector('iframe');
+
+    if (isPlaying) {
+      if (playerRef.current && isReadyRef.current) {
+        try {
+          playerRef.current.playVideo();
+        } catch (e) {
+          console.warn('Failed to play YouTube video:', e);
+        }
       }
-    } catch (e) {
-      console.warn('Failed to control YouTube playback:', e);
+      try {
+        iframe?.contentWindow?.postMessage(
+          JSON.stringify({ event: 'command', func: 'playVideo', args: '' }),
+          '*'
+        );
+      } catch (e) {}
+    } else {
+      // Completely stop/pause
+      if (playerRef.current) {
+        try {
+          playerRef.current.pauseVideo();
+        } catch (e) {}
+        try {
+          playerRef.current.stopVideo();
+        } catch (e) {}
+      }
+      try {
+        iframe?.contentWindow?.postMessage(
+          JSON.stringify({ event: 'command', func: 'pauseVideo', args: '' }),
+          '*'
+        );
+        iframe?.contentWindow?.postMessage(
+          JSON.stringify({ event: 'command', func: 'stopVideo', args: '' }),
+          '*'
+        );
+      } catch (e) {}
     }
   }, [isPlaying]);
 

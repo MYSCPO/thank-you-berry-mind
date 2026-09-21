@@ -17,6 +17,7 @@ import {
 } from '../utils/googleSheets';
 import { QUADRANT_CONFIGS } from '../data/mockData';
 import { WordCloud } from './WordCloud';
+import { RosterModal } from './RosterModal';
 import {
   Users,
   CheckCircle2,
@@ -40,11 +41,13 @@ import {
 interface TeacherDashboardProps {
   students: Student[];
   diaries: DiaryEntry[];
+  onUpdateStudents?: (students: Student[]) => void;
 }
 
 export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   students,
-  diaries
+  diaries,
+  onUpdateStudents
 }) => {
   const [selectedClass, setSelectedClass] = useState<string>('전체');
   const [selectedPeriod, setSelectedPeriod] = useState<string>('이번달');
@@ -53,6 +56,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
 
   // Google Sheets integration state
   const [isSheetsModalOpen, setIsSheetsModalOpen] = useState(false);
+  const [isRosterModalOpen, setIsRosterModalOpen] = useState(false);
   const [sheetsUrlInput, setSheetsUrlInput] = useState('');
   const [isCopiedCode, setIsCopiedCode] = useState(false);
   const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'success' | 'fail'>('idle');
@@ -152,7 +156,15 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              onClick={() => setIsRosterModalOpen(true)}
+              className="px-3 py-1.5 rounded-xl border text-xs font-black flex items-center gap-1.5 transition shadow-2xs cursor-pointer bg-white hover:bg-stone-50 border-blue-300 text-blue-800"
+            >
+              <Users className="w-3.5 h-3.5 text-blue-600" />
+              <span>학생 명렬표 관리 ({students.length}명)</span>
+            </button>
+
             <button
               onClick={() => setIsSheetsModalOpen(true)}
               className="px-3 py-1.5 rounded-xl border text-xs font-black flex items-center gap-1.5 transition shadow-2xs cursor-pointer bg-white hover:bg-stone-50 border-emerald-300 text-emerald-800"
@@ -603,13 +615,16 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                   구글 드라이브에서 새 <strong>구글 스프레드시트</strong>를 만듭니다.
                 </li>
                 <li>
+                  (선택) 하단 [+]로 새 시트를 만들어 이름을 <strong>'학생명렬표'</strong>로 두고 [A]학년 [B]반 [C]번호 [D]이름을 적으면 학생 명렬표도 함께 연동됩니다.
+                </li>
+                <li>
                   상단 메뉴 <strong>[확장 프로그램] &gt; [Apps Script]</strong>를 클릭합니다.
                 </li>
                 <li>
                   기존 코드를 모두 지우고, 아래의 <strong>[Apps Script 코드 복사]</strong>를 눌러 붙여넣습니다.
                 </li>
                 <li>
-                  우측 상단 파란색 <strong>[배포] &gt; [새 배포]</strong>를 클릭합니다.
+                  우측 상단 파란색 <strong>[배포] &gt; [새 배포]</strong>를 클릭합니다. (기존 배포가 있다면 [배포 관리]에서 수정 &gt; 새 버전 선택)
                 </li>
                 <li>
                   유형(톱니바퀴)에서 <strong>[웹 앱]</strong>을 선택하고, 액세스 권한을 반드시 <strong>'모든 사용자(Anyone)'</strong>로 설정 후 배포합니다.
@@ -618,6 +633,25 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                   생성된 <strong>웹 앱 URL (https://script.google.com/.../exec)</strong>을 위 입력칸에 넣고 저장하면 완료됩니다!
                 </li>
               </ol>
+            </div>
+
+            {/* Student Roster Banner inside Sheets Modal */}
+            <div className="bg-blue-50/80 p-3.5 rounded-2xl border border-blue-200 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Users className="w-4 h-4 text-blue-700 flex-shrink-0" />
+                <span className="text-xs text-blue-900 font-bold">
+                  학생들의 명렬표(이름/번호)도 구글 시트에서 관리하고 싶으신가요?
+                </span>
+              </div>
+              <button
+                onClick={() => {
+                  setIsSheetsModalOpen(false);
+                  setIsRosterModalOpen(true);
+                }}
+                className="px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-black whitespace-nowrap shadow-2xs transition cursor-pointer"
+              >
+                학생 명렬표 관리 열기
+              </button>
             </div>
 
             {/* Code Copy Box */}
@@ -648,6 +682,22 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           </div>
         </div>
       )}
+
+      {/* Student Roster Management Modal */}
+      <RosterModal
+        isOpen={isRosterModalOpen}
+        onClose={() => setIsRosterModalOpen(false)}
+        students={students}
+        onSaveStudents={newStudents => {
+          if (onUpdateStudents) {
+            onUpdateStudents(newStudents);
+          }
+        }}
+        onOpenSheetsSettings={() => {
+          setIsRosterModalOpen(false);
+          setIsSheetsModalOpen(true);
+        }}
+      />
 
       {/* Full-screen TV / Projector Modal */}
       {isFullScreenModalOpen && (

@@ -20,7 +20,6 @@ import { YouTubeAudioPlayer } from './YouTubeAudioPlayer';
 
 export type MeditationMode = 'breathing' | 'singingBowl';
 export type BreathingSound = 'waves' | 'wind' | 'silent';
-export type SingingBowlSound = 'singingBowl' | 'piano' | 'silent';
 
 export const YOUTUBE_DEFAULT_VIDEO_ID = 'ugQQLyGs9SA';
 
@@ -48,19 +47,13 @@ export const BreathingModal: React.FC<BreathingModalProps> = ({
   const [isRunning, setIsRunning] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
-  // Audio selections
+  // Audio selections for breathing mode
   const [breathingSound, setBreathingSound] = useState<BreathingSound>('waves');
-  const [singingBowlSound, setSingingBowlSound] = useState<SingingBowlSound>('singingBowl');
 
-  // YouTube Audio Mode toggle (Active by default for Singing Bowl!)
-  const [useYouTubeAudio, setUseYouTubeAudio] = useState(true);
+  // YouTube Audio for Singing Bowl (Default & Dedicated)
   const [customYouTubeUrl, setCustomYouTubeUrl] = useState('https://youtu.be/ugQQLyGs9SA');
   const [activeVideoId, setActiveVideoId] = useState(YOUTUBE_DEFAULT_VIDEO_ID);
   const [isYouTubePlaying, setIsYouTubePlaying] = useState(false);
-
-  // Custom audio upload for singing bowl
-  const [hasCustomAudio, setHasCustomAudio] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Breathing cycle phase (4-4-4 breathing)
   const [phase, setPhase] = useState<'inhale' | 'hold' | 'exhale'>('inhale');
@@ -69,7 +62,7 @@ export const BreathingModal: React.FC<BreathingModalProps> = ({
   // Visual ripple for singing bowl
   const [bowlRipple, setBowlRipple] = useState(false);
 
-  // Reset when modal opens
+  // Reset when modal opens or closes
   useEffect(() => {
     if (isOpen) {
       setMode(initialMode);
@@ -81,7 +74,6 @@ export const BreathingModal: React.FC<BreathingModalProps> = ({
       setCycleSeconds(0);
       setPhase('inhale');
       setIsYouTubePlaying(false);
-      setHasCustomAudio(Boolean(soundEngine.getCustomAudio()));
     } else {
       setIsRunning(false);
       setIsYouTubePlaying(false);
@@ -117,14 +109,15 @@ export const BreathingModal: React.FC<BreathingModalProps> = ({
     }
   }, [isOpen, isRunning, mode, breathingSound]);
 
-  // Synchronize YouTube audio playback with timer running state in Singing Bowl mode
+  // Synchronize YouTube audio playback strictly with timer running state in Singing Bowl mode
   useEffect(() => {
-    if (isOpen && isRunning && mode === 'singingBowl' && useYouTubeAudio) {
+    if (isOpen && isRunning && mode === 'singingBowl') {
       setIsYouTubePlaying(true);
     } else {
       setIsYouTubePlaying(false);
+      soundEngine.stopAll();
     }
-  }, [isOpen, isRunning, mode, useYouTubeAudio]);
+  }, [isOpen, isRunning, mode]);
 
   // Main countdown timer
   useEffect(() => {
@@ -135,18 +128,7 @@ export const BreathingModal: React.FC<BreathingModalProps> = ({
         if (prev <= 1) {
           setIsRunning(false);
           setIsYouTubePlaying(false);
-          soundEngine.stopAmbient();
-
-          // Ending chime only if not playing YouTube or if chosen
-          if (mode === 'singingBowl') {
-            if (!useYouTubeAudio) {
-              if (singingBowlSound === 'singingBowl') {
-                soundEngine.playSingingBowl();
-              } else if (singingBowlSound === 'piano') {
-                soundEngine.playPianoChord();
-              }
-            }
-          }
+          soundEngine.stopAll();
           return 0;
         }
         return prev - 1;
@@ -162,18 +144,10 @@ export const BreathingModal: React.FC<BreathingModalProps> = ({
           return next;
         });
       }
-
-      // Interval bell ONLY in singing bowl mode without continuous YouTube sound
-      if (mode === 'singingBowl' && !useYouTubeAudio && timeLeft % 60 === 0 && timeLeft !== totalSeconds && timeLeft > 0) {
-        if (singingBowlSound === 'singingBowl') {
-          soundEngine.playSingingBowl();
-          triggerBowlAnimation();
-        }
-      }
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [isRunning, timeLeft, mode, singingBowlSound, useYouTubeAudio, totalSeconds]);
+  }, [isRunning, timeLeft, mode]);
 
   const triggerBowlAnimation = () => {
     setBowlRipple(true);
@@ -187,25 +161,17 @@ export const BreathingModal: React.FC<BreathingModalProps> = ({
     setIsRunning(true);
     setIsSettingsOpen(false);
 
-    // Initial sound for singing bowl mode
+    // Start singing bowl sound
     if (mode === 'singingBowl') {
       triggerBowlAnimation();
-      if (useYouTubeAudio) {
-        setIsYouTubePlaying(true);
-      } else {
-        if (singingBowlSound === 'singingBowl') {
-          soundEngine.playSingingBowl();
-        } else if (singingBowlSound === 'piano') {
-          soundEngine.playPianoChord();
-        }
-      }
+      setIsYouTubePlaying(true);
     }
   };
 
   const handlePause = () => {
     setIsRunning(false);
     setIsYouTubePlaying(false);
-    soundEngine.stopAmbient();
+    soundEngine.stopAll();
   };
 
   const handleReset = () => {
@@ -215,6 +181,13 @@ export const BreathingModal: React.FC<BreathingModalProps> = ({
     setCycleSeconds(0);
     setPhase('inhale');
     soundEngine.stopAll();
+  };
+
+  const handleClose = () => {
+    setIsRunning(false);
+    setIsYouTubePlaying(false);
+    soundEngine.stopAll();
+    onClose();
   };
 
   // Adjust time by minutes
@@ -231,30 +204,6 @@ export const BreathingModal: React.FC<BreathingModalProps> = ({
     const sec = minutes * 60;
     setTotalSeconds(sec);
     setTimeLeft(sec);
-  };
-
-  // Handle user uploading custom singing bowl audio recording
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = event => {
-      const result = event.target?.result as string;
-      if (result) {
-        soundEngine.setCustomAudio(result);
-        setHasCustomAudio(true);
-        setUseYouTubeAudio(false);
-        soundEngine.playSingingBowl();
-        alert('실제 녹음 파일이 등록되었습니다! 이제 싱잉볼 울림 시 이 음원이 재생됩니다.');
-      }
-    };
-    reader.readAsDataURL(file);
-  };
-
-  const handleRemoveCustomAudio = () => {
-    soundEngine.removeCustomAudio();
-    setHasCustomAudio(false);
   };
 
   if (!isOpen) return null;
@@ -315,13 +264,13 @@ export const BreathingModal: React.FC<BreathingModalProps> = ({
               className={`p-2 rounded-xl transition cursor-pointer ${
                 isSettingsOpen ? 'bg-emerald-500/20 text-emerald-300' : 'hover:bg-stone-800 text-stone-400 hover:text-stone-200'
               }`}
-              title="상세 사운드 및 유튜브 음원 설정"
+              title="유튜브 싱잉볼 음원 설정"
             >
               <Sliders className="w-4 h-4" />
             </button>
             <button
               type="button"
-              onClick={onClose}
+              onClick={handleClose}
               className="p-2 rounded-xl hover:bg-stone-800 text-stone-400 hover:text-stone-200 transition cursor-pointer"
             >
               <X className="w-5 h-5" />
@@ -335,6 +284,7 @@ export const BreathingModal: React.FC<BreathingModalProps> = ({
             type="button"
             onClick={() => {
               setMode('breathing');
+              setIsRunning(false);
               setIsYouTubePlaying(false);
               soundEngine.stopAll();
             }}
@@ -345,17 +295,19 @@ export const BreathingModal: React.FC<BreathingModalProps> = ({
             }`}
           >
             <Wind className="w-3.5 h-3.5" />
-            <span>🌱 4-4-4 호흡</span>
+            <span>🌿 4-4-4 호흡</span>
           </button>
           <button
             type="button"
             onClick={() => {
               setMode('singingBowl');
+              setIsRunning(false);
+              setIsYouTubePlaying(false);
               soundEngine.stopAll();
             }}
             className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
               mode === 'singingBowl'
-                ? 'bg-amber-600 text-white shadow-md'
+                ? 'bg-amber-500 text-stone-950 font-black shadow-md'
                 : 'bg-stone-900 text-stone-400 hover:text-stone-200 border border-stone-800'
             }`}
           >
@@ -364,10 +316,9 @@ export const BreathingModal: React.FC<BreathingModalProps> = ({
           </button>
         </div>
 
-        {/* DETAILED SETTINGS VIEW (YouTube Link & Audio Setup) */}
+        {/* DETAILED SETTINGS VIEW (YouTube Link Setup) */}
         {isSettingsOpen ? (
           <div className="space-y-4 py-2 text-left animate-in fade-in duration-150 overflow-y-auto max-h-[50vh] pr-1">
-            
             {/* YouTube Audio Link Box */}
             <div className="bg-stone-900/90 p-3.5 rounded-2xl border border-stone-800 space-y-2.5">
               <div className="flex items-center justify-between text-xs">
@@ -376,12 +327,12 @@ export const BreathingModal: React.FC<BreathingModalProps> = ({
                   <span>유튜브 싱잉볼 음원 연동</span>
                 </span>
                 <span className="text-[10px] text-emerald-400 font-bold flex items-center gap-1">
-                  <Check className="w-3 h-3" /> 연동됨
+                  <Check className="w-3 h-3" /> 기본 연동됨
                 </span>
               </div>
 
               <p className="text-[11px] text-stone-400 leading-snug">
-                선생님께서 전달해 주신 유튜브 싱잉볼 영상의 오디오가 명상 시작 시 자동으로 재생됩니다.
+                싱잉볼 명상 시 등록된 유튜브 싱잉볼 영상의 잔잔한 공명 사운드가 자동으로 재생됩니다.
               </p>
 
               <div className="flex items-center gap-1.5">
@@ -392,66 +343,6 @@ export const BreathingModal: React.FC<BreathingModalProps> = ({
                   placeholder="https://youtu.be/..."
                   className="flex-1 bg-stone-950 border border-stone-700 rounded-xl px-2.5 py-1.5 text-xs text-stone-200 focus:outline-none focus:border-amber-400 font-mono"
                 />
-              </div>
-
-              <div className="flex items-center justify-between pt-1">
-                <span className="text-[11px] text-stone-400">명상 시 유튜브 음원 자동 재생:</span>
-                <button
-                  type="button"
-                  onClick={() => setUseYouTubeAudio(!useYouTubeAudio)}
-                  className={`px-3 py-1 rounded-xl text-xs font-bold transition cursor-pointer ${
-                    useYouTubeAudio
-                      ? 'bg-amber-500 text-stone-950 shadow-xs'
-                      : 'bg-stone-800 text-stone-400 hover:text-stone-200'
-                  }`}
-                >
-                  {useYouTubeAudio ? '사용 중 (기본)' : '미사용 (내장 타종)'}
-                </button>
-              </div>
-            </div>
-
-            {/* Custom Recording Audio File Registration for Singing Bowl */}
-            <div className="bg-stone-900/90 p-3.5 rounded-2xl border border-stone-800 space-y-2">
-              <div className="flex items-center justify-between text-xs">
-                <span className="font-bold text-stone-200 flex items-center gap-1.5">
-                  <Upload className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>내 오디오 파일 직접 등록</span>
-                </span>
-                {hasCustomAudio && (
-                  <span className="text-[10px] text-emerald-400 font-bold flex items-center gap-1">
-                    <Check className="w-3 h-3" /> 파일 등록됨
-                  </span>
-                )}
-              </div>
-              <p className="text-[11px] text-stone-400 leading-snug">
-                보유하신 별도의 오디오 파일(MP3, WAV)이 있으시면 교체하여 울릴 수도 있습니다.
-              </p>
-
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="audio/*"
-                onChange={handleFileUpload}
-                className="hidden"
-              />
-
-              <div className="flex items-center gap-2 pt-1">
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="px-3 py-1.5 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-200 text-xs font-bold border border-stone-700 transition cursor-pointer flex items-center gap-1"
-                >
-                  <span>📂 내 파일 불러오기</span>
-                </button>
-                {hasCustomAudio && (
-                  <button
-                    type="button"
-                    onClick={handleRemoveCustomAudio}
-                    className="px-2.5 py-1.5 rounded-xl bg-stone-800 hover:bg-rose-950/60 text-stone-400 hover:text-rose-300 text-xs transition cursor-pointer"
-                  >
-                    삭제
-                  </button>
-                )}
               </div>
             </div>
 
@@ -499,12 +390,10 @@ export const BreathingModal: React.FC<BreathingModalProps> = ({
                   type="button"
                   onClick={() => {
                     triggerBowlAnimation();
-                    if (useYouTubeAudio) {
-                      setIsYouTubePlaying(!isYouTubePlaying);
-                    } else {
-                      if (singingBowlSound !== 'silent') {
-                        soundEngine.playSingingBowl();
-                      }
+                    const next = !isYouTubePlaying;
+                    setIsYouTubePlaying(next);
+                    if (!next) {
+                      soundEngine.stopAll();
                     }
                   }}
                   className="w-32 h-32 sm:w-36 sm:h-36 rounded-full bg-gradient-to-b from-amber-600/30 via-stone-800 to-stone-900 border-2 border-amber-500/50 shadow-2xl flex flex-col items-center justify-center p-3 group transition transform active:scale-95 cursor-pointer"
@@ -513,16 +402,15 @@ export const BreathingModal: React.FC<BreathingModalProps> = ({
                   <span className="text-3xl mb-1 filter drop-shadow">🔔</span>
                   <span className="text-xs font-black text-amber-200">마음챙김 싱잉볼</span>
                   <span className="text-[9px] text-amber-400/80 mt-0.5 group-hover:text-amber-300">
-                    {useYouTubeAudio ? (isYouTubePlaying ? '🎵 유튜브 음원 재생 중' : '터치 시 음원 재생/일시정지') : '터치 시 맑은 공명'}
+                    {isYouTubePlaying ? '🎵 싱잉볼 재생 중 (터치 시 멈춤)' : '터치 시 싱잉볼 재생'}
                   </span>
                 </button>
               </div>
             )}
 
-            {/* SOUND SELECTION STRIP (Contextual per mode) */}
-            <div className="w-full bg-stone-900/90 p-2 rounded-2xl border border-stone-800 my-2">
-              {mode === 'breathing' ? (
-                /* Breathing Mode Sounds: Ocean waves vs Wind vs Silent */
+            {/* SOUND SELECTION STRIP (Only shown for breathing mode) */}
+            {mode === 'breathing' && (
+              <div className="w-full bg-stone-900/90 p-2 rounded-2xl border border-stone-800 my-2">
                 <div className="flex items-center justify-between text-xs px-1">
                   <span className="text-[11px] font-bold text-stone-400 flex items-center gap-1">
                     <Waves className="w-3.5 h-3.5 text-sky-400" />
@@ -564,84 +452,8 @@ export const BreathingModal: React.FC<BreathingModalProps> = ({
                     </button>
                   </div>
                 </div>
-              ) : (
-                /* Singing Bowl Mode Sounds: YouTube vs Singing bowl vs Piano vs Silent */
-                <div className="flex items-center justify-between text-xs px-1">
-                  <span className="text-[11px] font-bold text-stone-400 flex items-center gap-1">
-                    <Bell className="w-3.5 h-3.5 text-amber-400" />
-                    <span>사운드:</span>
-                  </span>
-                  <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setUseYouTubeAudio(true);
-                        setIsYouTubePlaying(isRunning);
-                      }}
-                      className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition cursor-pointer flex items-center gap-1 ${
-                        useYouTubeAudio
-                          ? 'bg-red-600 text-white shadow-xs'
-                          : 'bg-stone-800 text-stone-400 hover:text-stone-200'
-                      }`}
-                      title="유튜브 싱잉볼 음원"
-                    >
-                      <Youtube className="w-3 h-3" />
-                      <span>유튜브 싱잉볼</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setUseYouTubeAudio(false);
-                        setIsYouTubePlaying(false);
-                        setSingingBowlSound('singingBowl');
-                        soundEngine.playSingingBowl();
-                      }}
-                      className={`px-2 py-1 rounded-lg text-[11px] font-bold transition cursor-pointer flex items-center gap-1 ${
-                        !useYouTubeAudio && singingBowlSound === 'singingBowl'
-                          ? 'bg-amber-600 text-white'
-                          : 'bg-stone-800 text-stone-400 hover:text-stone-200'
-                      }`}
-                    >
-                      <span>🔔 타종</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setUseYouTubeAudio(false);
-                        setIsYouTubePlaying(false);
-                        setSingingBowlSound('piano');
-                        soundEngine.playPianoChord();
-                      }}
-                      className={`px-2 py-1 rounded-lg text-[11px] font-bold transition cursor-pointer ${
-                        !useYouTubeAudio && singingBowlSound === 'piano'
-                          ? 'bg-emerald-600 text-white'
-                          : 'bg-stone-800 text-stone-400 hover:text-stone-200'
-                      }`}
-                    >
-                      <span>🎵 피아노</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setUseYouTubeAudio(false);
-                        setIsYouTubePlaying(false);
-                        setSingingBowlSound('silent');
-                      }}
-                      className={`px-2 py-1 rounded-lg text-[11px] font-bold transition cursor-pointer ${
-                        !useYouTubeAudio && singingBowlSound === 'silent'
-                          ? 'bg-stone-700 text-white'
-                          : 'bg-stone-800 text-stone-400 hover:text-stone-200'
-                      }`}
-                    >
-                      <span>무음</span>
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
+              </div>
+            )}
 
             {/* DIGITAL TIMER WITH DIRECT INCREMENT/DECREMENT BUTTONS */}
             <div className="flex items-center justify-center gap-3 my-1">
